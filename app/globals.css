@@ -275,3 +275,68 @@ legend { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-sp
 
 /* iOS zooms into any focused field under 16px; keep every editable field at 16px+ */
 input, textarea, select { font-size: max(16px, 1em); }
+
+/* ---------- voice + attachments ---------- */
+.chat { position: relative; }
+.voicebar { display: flex; align-items: center; gap: 10px; padding: 8px 0 2px; min-height: 38px; }
+.vtoggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); background: #fff; border-radius: 99px;
+  padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-2);
+}
+.vtoggle.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.vstatus { font-size: 12.5px; color: var(--ink-2); }
+.vstatus.live { color: #c43d30; font-weight: 600; }
+.vstatus.live::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e0483a; margin-right: 6px; animation: blink 1s steps(2, start) infinite; }
+
+.iconbtn {
+  flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+  display: grid; place-items: center; cursor: pointer;
+  background: #fff; border: 1px solid var(--line); color: var(--ink);
+}
+.iconbtn:hover { background: #fbf7ec; }
+.iconbtn.mic.live { background: #e0483a; border-color: #e0483a; color: #fff; animation: micpulse 1.4s ease-out infinite; }
+@keyframes micpulse { 0% { box-shadow: 0 0 0 0 rgba(224,72,58,.45); } 100% { box-shadow: 0 0 0 12px rgba(224,72,58,0); } }
+.composer { gap: 6px; }
+.composer .primary { height: 42px; }
+
+.readbtn {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 6px;
+  background: none; border: 0; padding: 2px 0; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--ink-2);
+}
+.readbtn:hover, .readbtn.on { color: var(--gold-ink); }
+
+.attachrow { padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.fnote { margin: 0; font-size: 12.5px; color: #8a2a20; }
+.filechips { display: flex; flex-wrap: wrap; gap: 6px; }
+.msg .filechips { margin-bottom: 6px; }
+.filechip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 220px;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 4px 6px 4px 4px;
+  font-size: 12.5px; color: var(--ink);
+}
+.msg.user .filechip { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); color: #fff; }
+.filechip img { width: 34px; height: 34px; border-radius: 7px; object-fit: cover; display: block; }
+.msg .filechip.image { padding: 3px; }
+.msg .filechip.image img { width: 120px; height: auto; max-height: 120px; }
+.msg .filechip.image .fname { display: none; }
+.ficon { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; background: #efe7d3; color: var(--gold-ink); }
+.fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx { border: 0; background: none; padding: 2px; cursor: pointer; color: var(--ink-2); display: grid; place-items: center; }
+
+.chat.dragging .msgs { opacity: .35; }
+.dropzone {
+  position: absolute; inset: 40px 0 60px; display: grid; place-items: center;
+  border: 2px dashed var(--gold); border-radius: 14px; background: rgba(255,246,226,0.85);
+  font-weight: 600; color: var(--gold-ink); pointer-events: none;
+}
+
+.voicepick select {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  padding: 9px 10px; font-size: 16px; color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconbtn.mic.live, .vstatus.live::before { animation: none; }
+}

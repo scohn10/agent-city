@@ -8,9 +8,18 @@ and connect it to their own AI:
 - **OpenAI-compatible** — any `/chat/completions` endpoint (OpenAI, OpenRouter, Groq…)
 - **Demo agent** — sample replies, no key, so anyone can try the city first
 - **Webhook** — their own agent (Claude Agent SDK, n8n, Zapier, custom). We POST
-  `{ agent, message, history }` and show `{ "reply": "..." }` or plain text.
+  `{ agent, message, history, attachments }` and show `{ "reply": "..." }` or plain text.
 
 Central Station lists every agent and can ask all of them a question at once.
+
+Every chat supports:
+- **Attachments** — images (shrunk to 1600px JPEG), PDFs, and text/CSV/JSON files; up to 4 per
+  message and ~3 MB total. Claude gets native image/document blocks, OpenAI-compatible models get
+  `image_url`/`file` parts, webhooks get an `attachments` array. Text files are inlined for all.
+  Only file names and a small image preview are kept in chat history.
+- **Speech to text** — mic button (browser Web Speech API; Chrome, Edge, Safari).
+- **Voice** — "Listen" on any reply, a per-agent voice picker, and **Voice mode**: speak, the agent
+  answers out loud, then it listens again.
 
 New users get a guided tour: a welcome screen (name your city), then four coached steps:
 build an agent on a spotlighted park, set it up (a no-key **Demo agent** is preselected),

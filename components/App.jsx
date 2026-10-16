@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CityMap, { buildingArt } from './CityMap';
+import {
+  ACCEPT, prepareFiles, fileMeta, fileWire, useDictation, useVoices,
+  ttsSupported, speak, stopSpeaking, unlockSpeech,
+} from './media';
 import { STYLES, COLORS, PROVIDERS, FIELD_LABELS, GRID, W2, H2, blankCity } from '../lib/city';
 
 const STORE_KEY = 'agentcity:v1';
@@ -37,14 +41,18 @@ function uid() {
   try { return crypto.randomUUID(); } catch { return Math.random().toString(36).slice(2); }
 }
 
-async function relay(agent, message, history, cityName) {
+async function relay(agent, message, history, cityName, files = []) {
   const res = await fetch('/api/relay', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       agent: { name: agent.name, role: agent.role, instructions: agent.instructions, connection: agent.connection },
       message,
-      history: history.map(m => ({ role: m.role, content: m.content })),
+      history: history.filter(m => !m.error).map(m => ({
+        role: m.role,
+        content: m.content + (m.files?.length ? `\n[Attached: ${m.files.map(f => f.name).join(', ')}]` : ''),
+      })),
+      attachments: files.map(fileWire),
       cityName,
     }),
   });
@@ -70,6 +78,26 @@ function StyleSwatch({ style, color, selected, onClick }) {
       <span className="sw-name">{st.label}</span>
       <span className="sw-good">{st.good}</span>
     </button>
+  );
+}
+
+function VoicePicker({ value, onChange }) {
+  const voices = useVoices();
+  const [ok, setOk] = useState(false);
+  useEffect(() => { setOk(ttsSupported()); }, []);
+  if (!ok) return null;
+  return (
+    <fieldset>
+      <legend>Voice</legend>
+      <div className="row voicepick">
+        <select value={value} onChange={e => onChange(e.target.value)} aria-label="Agent voice">
+          <option value="">Device default</option>
+          {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}{v.lang ? ` (${v.lang})` : ''}</option>)}
+        </select>
+        <button type="button" className="ghost" onClick={() => { unlockSpeech(); speak('Hi, this is how I will sound when I read my replies to you.', { voiceURI: value }); }}>Preview</button>
+      </div>
+      <p className="hint">Used when this agent reads its replies aloud. Voices come from your device, so they can differ between phone and computer.</p>
+    </fieldset>
   );
 }
 
@@ -127,6 +155,8 @@ function AgentForm({ initial, onSave, onCancel, cityName, defaultProvider = 'ant
         </div>
       </fieldset>
 
+      <VoicePicker value={a.voice || ''} onChange={v => set('voice', v)} />
+
       <fieldset>
         <legend>Connect your agent</legend>
         <div className="seg">
@@ -174,35 +204,215 @@ function AgentForm({ initial, onSave, onCancel, cityName, defaultProvider = 'ant
 
 /* ---------------- Chat ---------------- */
 
-function Chat({ messages, busy, onSend, placeholder, suggestions }) {
-  const [text, setText] = useState('');
-  const end = useRef(null);
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [messages.length, busy]);
+const Icon = {
+  clip: <path d="M16.5 6.5 8.4 14.6a2.2 2.2 0 0 0 3.1 3.1l8.2-8.2a4 4 0 0 0-5.7-5.7l-8.4 8.4a5.8 5.8 0 0 0 8.2 8.2L21 13.2" />,
+  mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" /></>,
+  speaker: <><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /></>,
+  stop: <rect x="7" y="7" width="10" height="10" rx="1.5" />,
+  wave: <path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 10v4M21 12h0" />,
+  file: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
+  x: <path d="M7 7l10 10M17 7 7 17" />,
+};
+const Svg = ({ name, size = 20 }) => (
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{Icon[name]}</svg>
+);
+
+function FileChips({ files, onRemove }) {
   return (
-    <div className="chat">
+    <div className="filechips">
+      {files.map((f, i) => (
+        <div key={f.id || i} className={`filechip ${f.kind}`} title={f.name}>
+          {f.thumb ? <img src={f.thumb} alt="" /> : <span className="ficon"><Svg name="file" size={16} /></span>}
+          <span className="fname">{f.name}</span>
+          {onRemove && (
+            <button type="button" className="fx" onClick={() => onRemove(f.id)} aria-label={`Remove ${f.name}`}><Svg name="x" size={14} /></button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () => undefined }) {
+  const [text, setText] = useState('');
+  const [files, setFiles] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [drag, setDrag] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [speaking, setSpeaking] = useState(null); // index of message being read
+  const [canSpeak, setCanSpeak] = useState(false);
+  const dict = useDictation();
+  const end = useRef(null);
+  const fileInput = useRef(null);
+
+  const voiceModeRef = useRef(false);
+  const busyRef = useRef(busy);
+  const queue = useRef([]);
+  const speakingRef = useRef(false);
+  const seen = useRef(messages.length);
+  const msgsRef = useRef(messages);
+  const voiceForRef = useRef(voiceFor);
+  busyRef.current = busy;
+  voiceModeRef.current = voiceMode;
+  msgsRef.current = messages;
+  voiceForRef.current = voiceFor;
+
+  useEffect(() => { setCanSpeak(ttsSupported()); }, []);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [messages.length, busy]);
+  useEffect(() => () => { stopSpeaking(); dict.stop(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function send(raw) {
+    if (busyRef.current) return;
+    const t = (raw ?? text).trim() || (files.length ? `Please take a look at the attached file${files.length > 1 ? 's' : ''}.` : '');
+    if (!t) return;
+    onSend(t, files);
+    setText('');
+    setFiles([]);
+    setNotes([]);
+  }
+
+  function listen() {
+    if (!dict.supported || dict.listening) return;
+    dict.start(said => {
+      if (said && voiceModeRef.current) send(said);
+    });
+  }
+
+  // Read new replies aloud in voice mode, one after another, then listen again.
+  function pump() {
+    if (speakingRef.current) return;
+    const next = queue.current.shift();
+    if (next === undefined) {
+      if (voiceModeRef.current && !busyRef.current) listen();
+      return;
+    }
+    const m = msgsRef.current[next];
+    if (!m) { pump(); return; }
+    speakingRef.current = true;
+    setSpeaking(next);
+    speak(m.from ? `${m.from}. ${m.content}` : m.content, {
+      voiceURI: voiceForRef.current(m),
+      onEnd: () => { speakingRef.current = false; setSpeaking(null); pump(); },
+    });
+  }
+
+  useEffect(() => {
+    if (messages.length < seen.current) seen.current = messages.length;
+    for (let i = seen.current; i < messages.length; i++) {
+      if (messages[i].role === 'assistant' && voiceModeRef.current && canSpeak) queue.current.push(i);
+    }
+    seen.current = messages.length;
+    pump();
+  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleVoiceMode() {
+    if (voiceMode) {
+      setVoiceMode(false);
+      queue.current = [];
+      stopSpeaking();
+      speakingRef.current = false;
+      setSpeaking(null);
+      dict.stop();
+      return;
+    }
+    unlockSpeech();
+    setVoiceMode(true);
+    voiceModeRef.current = true;
+    listen();
+  }
+
+  function readOne(i) {
+    if (speaking === i) { stopSpeaking(); speakingRef.current = false; setSpeaking(null); return; }
+    queue.current = [];
+    speakingRef.current = true;
+    setSpeaking(i);
+    const m = msgsRef.current[i];
+    speak(m.from ? `${m.from}. ${m.content}` : m.content, {
+      voiceURI: voiceForRef.current(m),
+      onEnd: () => { speakingRef.current = false; setSpeaking(null); },
+    });
+  }
+
+  function micTap() {
+    if (dict.listening) { dict.stop(); return; }
+    if (voiceMode) { stopSpeaking(); listen(); return; }
+    dict.start(said => { if (said) setText(t => (t ? t.replace(/\s*$/, ' ') : '') + said); });
+  }
+
+  async function addFiles(list) {
+    if (!list || !list.length) return;
+    const { items, errors } = await prepareFiles(list, files);
+    setFiles(f => [...f, ...items]);
+    setNotes(errors);
+  }
+
+  const status = dict.listening ? 'Listening…' : speaking !== null ? 'Speaking…' : busy ? 'Thinking…' : voiceMode ? (dict.supported ? 'Tap the mic to talk' : 'Replies will be read aloud') : '';
+  const shown = dict.listening && dict.interim ? (text ? text.replace(/\s*$/, ' ') : '') + dict.interim : text;
+
+  return (
+    <div className={`chat ${drag ? 'dragging' : ''}`}
+      onDragOver={e => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setDrag(true); } }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDrag(false); }}
+      onDrop={e => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}>
+      {canSpeak && (
+        <div className="voicebar">
+          <button type="button" className={`vtoggle ${voiceMode ? 'on' : ''}`} onClick={toggleVoiceMode} aria-pressed={voiceMode}>
+            <Svg name="wave" size={16} /> Voice mode {voiceMode ? 'on' : 'off'}
+          </button>
+          {status && <span className={`vstatus ${dict.listening ? 'live' : ''}`}>{status}</span>}
+        </div>
+      )}
       <div className="msgs">
-        {messages.length === 0 && !suggestions && <p className="empty">No messages yet. Give it a task.</p>}
+        {messages.length === 0 && !suggestions && <p className="empty">No messages yet. Give it a task, attach a file, or tap the mic.</p>}
         {messages.length === 0 && suggestions && (
           <div className="chips">
             {suggestions.map(t => (
-              <button key={t} type="button" className="chip" disabled={busy} onClick={() => onSend(t)}>{t}</button>
+              <button key={t} type="button" className="chip" disabled={busy} onClick={() => onSend(t, [])}>{t}</button>
             ))}
           </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role} ${m.error ? 'error' : ''}`}>
             {m.from && <div className="from">{m.from}</div>}
+            {m.files?.length > 0 && <FileChips files={m.files} />}
             <div className="body">{m.content}</div>
+            {m.role === 'assistant' && !m.error && canSpeak && (
+              <button type="button" className={`readbtn ${speaking === i ? 'on' : ''}`} onClick={() => readOne(i)}
+                aria-label={speaking === i ? 'Stop reading' : 'Read aloud'}>
+                <Svg name={speaking === i ? 'stop' : 'speaker'} size={15} />
+                {speaking === i ? 'Stop' : 'Listen'}
+              </button>
+            )}
           </div>
         ))}
         {busy && <div className="msg assistant typing"><span /><span /><span /></div>}
         <div ref={end} />
       </div>
-      <form className="composer" onSubmit={e => { e.preventDefault(); const t = text.trim(); if (!t || busy) return; setText(''); onSend(t); }}>
-        <textarea rows={1} value={text} placeholder={placeholder}
+      {drag && <div className="dropzone">Drop files to attach</div>}
+      {(files.length > 0 || notes.length > 0 || dict.error) && (
+        <div className="attachrow">
+          {files.length > 0 && <FileChips files={files} onRemove={id => setFiles(f => f.filter(x => x.id !== id))} />}
+          {notes.map((n, i) => <p key={i} className="fnote">{n}</p>)}
+          {dict.error && <p className="fnote">{dict.error}</p>}
+        </div>
+      )}
+      <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+        <input ref={fileInput} type="file" accept={ACCEPT} multiple hidden
+          onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+        <button type="button" className="iconbtn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files">
+          <Svg name="clip" />
+        </button>
+        <textarea rows={1} value={shown} placeholder={dict.listening ? 'Listening…' : placeholder} readOnly={dict.listening}
           onChange={e => setText(e.target.value)}
+          onPaste={e => { const f = e.clipboardData?.files; if (f && f.length) { e.preventDefault(); addFiles(f); } }}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.form.requestSubmit(); } }} />
-        <button className="primary" disabled={busy || !text.trim()}>Send</button>
+        {dict.supported && (
+          <button type="button" className={`iconbtn mic ${dict.listening ? 'live' : ''}`} onClick={micTap}
+            aria-label={dict.listening ? 'Stop listening' : 'Speak your message'} title={dict.listening ? 'Stop' : 'Speak'}>
+            <Svg name={dict.listening ? 'stop' : 'mic'} />
+          </button>
+        )}
+        <button className="primary" disabled={busy || dict.listening || (!text.trim() && !files.length)}>Send</button>
       </form>
     </div>
   );
@@ -338,15 +548,15 @@ export default function App() {
     updateAgent(lot, a => ({ ...a, unread: 0 }));
   }
 
-  async function sendTo(lot, text) {
+  async function sendTo(lot, text, files = []) {
     const agent = city.agents[lot];
     if (!agent) return;
     const prior = agent.history || [];
-    const userMsg = { role: 'user', content: text, ts: Date.now() };
+    const userMsg = { role: 'user', content: text, ts: Date.now(), ...(files.length ? { files: files.map(fileMeta) } : {}) };
     updateAgent(lot, a => ({ ...a, history: [...(a.history || []), userMsg] }));
     setStatuses(s => ({ ...s, [lot]: 'busy' }));
     try {
-      const reply = await relay(agent, text, prior, city.name);
+      const reply = await relay(agent, text, prior, city.name, files);
       const watching = viewRef.current?.type === 'agent' && viewRef.current?.lot === lot;
       updateAgent(lot, a => ({
         ...a,
@@ -363,18 +573,18 @@ export default function App() {
     }
   }
 
-  async function askEveryone(text) {
+  async function askEveryone(text, files = []) {
     const lots = Object.keys(city.agents);
     if (!lots.length) return;
     setBroadcasting(true);
-    setBroadcast(b => [...b, { role: 'user', content: text }]);
+    setBroadcast(b => [...b, { role: 'user', content: text, ...(files.length ? { files: files.map(fileMeta) } : {}) }]);
     await Promise.all(lots.map(async lot => {
       const name = city.agents[lot].name;
       try {
-        const reply = await sendTo(lot, text);
-        setBroadcast(b => [...b, { role: 'assistant', from: name, content: reply }]);
+        const reply = await sendTo(lot, text, files);
+        setBroadcast(b => [...b, { role: 'assistant', from: name, lot, content: reply }]);
       } catch (e) {
-        setBroadcast(b => [...b, { role: 'assistant', from: name, content: e.message, error: true }]);
+        setBroadcast(b => [...b, { role: 'assistant', from: name, lot, content: e.message, error: true }]);
       }
     }));
     setBroadcasting(false);
@@ -522,10 +732,11 @@ export default function App() {
                   When you're away, replies wait as bubbles over the building. Next stop: Central Station.
                 </TourNote>
               )}
-              <Chat messages={current.history || []} busy={statuses[view.lot] === 'busy'}
+              <Chat key={view.lot} messages={current.history || []} busy={statuses[view.lot] === 'busy'}
                 placeholder={`Message ${current.name}…`}
                 suggestions={tour === 'chat' || (current.history || []).length === 0 ? STARTERS : null}
-                onSend={t => sendTo(view.lot, t).catch(() => {})} />
+                voiceFor={() => current.voice}
+                onSend={(t, f) => sendTo(view.lot, t, f).catch(() => {})} />
             </>
           )}
 
@@ -557,7 +768,8 @@ export default function App() {
                 </ul>
               ) : <p className="empty">No agents yet. Close this and tap a + on any park.</p>}
               {count > 0 && (
-                <Chat messages={broadcast} busy={broadcasting} placeholder="Ask every agent…" onSend={askEveryone} />
+                <Chat messages={broadcast} busy={broadcasting} placeholder="Ask every agent…" onSend={askEveryone}
+                  voiceFor={m => agents[m.lot]?.voice} />
               )}
               <details className="settings">
                 <summary>City settings</summary>
