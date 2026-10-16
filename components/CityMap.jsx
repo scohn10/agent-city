@@ -127,66 +127,148 @@ function Park({ cx, cy, r, c, onAdd, interactive, dim }) {
   );
 }
 
-function Building({ cx, cy, agent, status, onOpen }) {
-  const st = STYLES[agent.style] || STYLES.office;
-  const color = (COLORS.find(c => c.id === agent.color) || COLORS[1]).base;
+// Draws one building at (cx, cy). Shared by the map and the building picker.
+export function buildingArt({ style, color: colorId, seed = 0, busy = false, cx = 0, cy = 0, pad = true }) {
+  const st = STYLES[style] || STYLES.office;
+  const color = (COLORS.find(c => c.id === colorId) || COLORS[1]).base;
   const a = W2 * st.footprint;
   const b = H2 * st.footprint;
   const h = st.height;
-  const busy = status === 'busy';
+  const P = (t, z) => [cx - a + t * a, cy + t * b - z];      // left face
+  const Q = (t, z) => [cx + t * a, cy + b - t * b - z];      // right face
+  const quad = (F, t1, t2, z1, z2) => pts([F(t1, z1), F(t2, z1), F(t2, z2), F(t1, z2)]);
   const parts = [];
 
-  // lot pad
-  parts.push(<polygon key="pad" points={diamond(cx, cy, 0.86)} fill="#cfc8b6" />);
-  parts.push(<polygon key="shadow" points={diamond(cx + 8, cy + 3, st.footprint * 0.98)} fill="#000" opacity="0.13" />);
-  parts.push(<Box key="body" cx={cx} cy={cy} a={a} b={b} h={h} color={color} />);
-
-  const winRows = Math.max(1, Math.floor(h / 18));
-  if (agent.style !== 'house') {
-    parts.push(<Windows key="win" cx={cx} cy={cy} a={a} b={b} h={h} rows={winRows}
-      cols={agent.style === 'tower' ? 3 : 4} glow={busy} seed={agent.name.length} />);
+  if (pad) {
+    parts.push(<polygon key="pad" points={diamond(cx, cy, 0.86)} fill="#cfc8b6" />);
+    parts.push(<polygon key="shadow" points={diamond(cx + 8, cy + 3, st.footprint * 0.98)} fill="#000" opacity="0.13" />);
   }
 
-  if (agent.style === 'tower') {
-    parts.push(<Box key="crown" cx={cx} cy={cy} a={a * 0.6} b={b * 0.6} h={16} z0={h} color={shade(color, 0.1)} />);
-    parts.push(<line key="ant" x1={cx} y1={cy - h - 16} x2={cx} y2={cy - h - 46} stroke="#3a3f47" strokeWidth="2" />);
-    parts.push(<circle key="antl" cx={cx} cy={cy - h - 46} r="2.6" fill="#ff5a4a" className="blink" />);
-  }
-  if (agent.style === 'office') {
-    parts.push(<Box key="rim" cx={cx} cy={cy} a={a * 1.03} b={b * 1.03} h={4} z0={h} color={shade(color, -0.3)} />);
-  }
-  if (agent.style === 'shop') {
-    const P = (t, z) => [cx - a + t * a, cy + t * b - z];
-    const Q = (t, z) => [cx + t * a, cy + b - t * b - z];
-    parts.push(<polygon key="awnL" points={pts([P(0, 30), P(1, 30), P(1.06, 22), P(0.06, 22)])} fill="#f2efe6" stroke={shade(color, -0.4)} strokeWidth="0.6" />);
-    parts.push(<polygon key="awnR" points={pts([Q(0, 30), Q(1, 30), Q(0.94, 22), Q(-0.06, 22)])} fill={shade(color, 0.35)} stroke={shade(color, -0.4)} strokeWidth="0.6" />);
-  }
-  if (agent.style === 'house') {
-    const ap = [cx, cy - h - 30];
-    parts.push(<polygon key="roofL" points={pts([ap, [cx - a, cy - h], [cx, cy + b - h]])} fill={shade(color, -0.35)} stroke={shade(color, -0.55)} strokeWidth="0.6" />);
-    parts.push(<polygon key="roofR" points={pts([ap, [cx, cy + b - h], [cx + a, cy - h]])} fill={shade(color, -0.5)} stroke={shade(color, -0.6)} strokeWidth="0.6" />);
-    parts.push(<polygon key="door" points={pts([[cx + a * 0.35, cy + b * 0.65], [cx + a * 0.55, cy + b * 0.45], [cx + a * 0.55, cy + b * 0.45 - 16], [cx + a * 0.35, cy + b * 0.65 - 16]])} fill="#3b2a20" />);
-    parts.push(<polygon key="hwin" points={pts([[cx - a * 0.7, cy + b * 0.3 - 10], [cx - a * 0.4, cy + b * 0.6 - 10], [cx - a * 0.4, cy + b * 0.6 - 20], [cx - a * 0.7, cy + b * 0.3 - 20]])} fill={busy ? '#ffe2a3' : '#9cc3d9'} />);
-  }
-  if (agent.style === 'factory') {
-    [[-0.35, 0], [0.25, -0.2]].forEach(([dx, dy], i) => {
-      const sx = cx + dx * a, sy = cy + dy * b;
-      parts.push(<Box key={`stk${i}`} cx={sx} cy={sy} a={6} b={3} h={34} z0={h} color="#7b5d4c" />);
-      parts.push(
-        <g key={`puff${i}`} className="puff" style={{ animationDelay: `${i * 1.3}s` }}>
-          <circle cx={sx} cy={sy - h - 42} r="6" fill="#e9e6df" opacity="0.8" />
-          <circle cx={sx + 6} cy={sy - h - 50} r="5" fill="#e9e6df" opacity="0.6" />
-        </g>
-      );
-    });
-  }
-  if (agent.style === 'lab') {
-    const r = a * 0.55;
-    parts.push(<path key="dome" d={`M ${cx - r} ${cy - h} A ${r} ${r * 0.9} 0 0 1 ${cx + r} ${cy - h} A ${r} ${r * 0.45} 0 0 1 ${cx - r} ${cy - h} Z`} fill="#dfe8ee" stroke="#8aa1b1" strokeWidth="0.8" />);
-    parts.push(<path key="slit" d={`M ${cx + r * 0.1} ${cy - h - r * 0.85} L ${cx + r * 0.3} ${cy - h + 2}`} stroke="#566c7c" strokeWidth="2.4" />);
+  const bodyColor = style === 'greenhouse' ? '#e7efe6' : color;
+  parts.push(<Box key="body" cx={cx} cy={cy} a={a} b={b} h={h} color={bodyColor} />);
+
+  if (st.windows) {
+    parts.push(<Windows key="win" cx={cx} cy={cy} a={a} b={b} h={h} rows={Math.max(1, Math.floor(h / 18))}
+      cols={st.windows} glow={busy} seed={seed} />);
   }
 
-  const topY = cy - h - (agent.style === 'tower' ? 50 : agent.style === 'house' ? 34 : agent.style === 'factory' ? 56 : agent.style === 'lab' ? a * 0.55 : 6);
+  switch (style) {
+    case 'tower':
+      parts.push(<Box key="crown" cx={cx} cy={cy} a={a * 0.6} b={b * 0.6} h={16} z0={h} color={shade(color, 0.1)} />);
+      parts.push(<line key="ant" x1={cx} y1={cy - h - 16} x2={cx} y2={cy - h - 46} stroke="#3a3f47" strokeWidth="2" />);
+      parts.push(<circle key="antl" cx={cx} cy={cy - h - 46} r="2.6" fill="#ff5a4a" className="blink" />);
+      break;
+    case 'deco': {
+      parts.push(<Box key="s1" cx={cx} cy={cy} a={a * 0.74} b={b * 0.74} h={20} z0={h} color={shade(color, 0.06)} />);
+      parts.push(<Box key="s2" cx={cx} cy={cy} a={a * 0.5} b={b * 0.5} h={18} z0={h + 20} color={shade(color, 0.12)} />);
+      const z = h + 38, sa = a * 0.3, sb = b * 0.3, top = [cx, cy - z - 40];
+      parts.push(<polygon key="spL" points={pts([top, [cx - sa, cy - z], [cx, cy + sb - z]])} fill="#e6e1d3" stroke="#8d8676" strokeWidth="0.6" />);
+      parts.push(<polygon key="spR" points={pts([top, [cx, cy + sb - z], [cx + sa, cy - z]])} fill="#b9b3a3" stroke="#8d8676" strokeWidth="0.6" />);
+      [0.35, 0.65].forEach((t, i) => parts.push(<polygon key={`chev${i}`} points={pts([[cx - sa * (1 - t), cy - z - 40 * t + sb * t * 0.2], [cx, cy - z - 40 * t + 6], [cx, cy - z - 40 * t + 10], [cx - sa * (1 - t), cy - z - 40 * t + 4]])} fill="#2f3a52" opacity="0.55" />));
+      break;
+    }
+    case 'office':
+      parts.push(<Box key="rim" cx={cx} cy={cy} a={a * 1.03} b={b * 1.03} h={4} z0={h} color={shade(color, -0.3)} />);
+      break;
+    case 'bank': {
+      parts.push(<Box key="steps" cx={cx} cy={cy} a={a * 1.06} b={b * 1.06} h={5} color="#d8d2c2" />);
+      [0.15, 0.32, 0.5, 0.68, 0.85].forEach((t, i) => {
+        parts.push(<polygon key={`colL${i}`} points={quad(P, t - 0.04, t + 0.04, 6, h - 10)} fill="#f3efe4" stroke="#b8b09c" strokeWidth="0.5" />);
+        parts.push(<polygon key={`colR${i}`} points={quad(Q, t - 0.04, t + 0.04, 6, h - 10)} fill="#d9d3c4" stroke="#b8b09c" strokeWidth="0.5" />);
+      });
+      parts.push(<Box key="entab" cx={cx} cy={cy} a={a * 1.04} b={b * 1.04} h={6} z0={h} color="#ebe5d6" />);
+      const pe = [P(0, h + 6), P(1, h + 6), P(0.5, h + 24)];
+      parts.push(<polygon key="ped" points={pts(pe)} fill="#f3efe4" stroke="#b8b09c" strokeWidth="0.7" />);
+      parts.push(<polygon key="pedR" points={pts([P(0.5, h + 24), P(1, h + 6), Q(1, h + 6), [cx + a * 0.5, cy - b * 0.5 - h - 24]])} fill={shade(color, -0.15)} stroke={shade(color, -0.45)} strokeWidth="0.6" />);
+      break;
+    }
+    case 'shop':
+      parts.push(<polygon key="awnL" points={pts([P(0, 30), P(1, 30), P(1.06, 22), P(0.06, 22)])} fill="#f2efe6" stroke={shade(color, -0.4)} strokeWidth="0.6" />);
+      parts.push(<polygon key="awnR" points={pts([Q(0, 30), Q(1, 30), Q(0.94, 22), Q(-0.06, 22)])} fill={shade(color, 0.35)} stroke={shade(color, -0.4)} strokeWidth="0.6" />);
+      break;
+    case 'showroom': {
+      parts.push(<polygon key="glL" points={quad(P, 0.04, 0.96, 3, h - 11)} fill="#bfe0ee" opacity="0.9" />);
+      parts.push(<polygon key="glR" points={quad(Q, 0.04, 0.96, 3, h - 11)} fill="#9fc6d8" opacity="0.9" />);
+      [0.35, 0.65].forEach((t, i) => {
+        parts.push(<polygon key={`muL${i}`} points={quad(P, t - 0.008, t + 0.008, 3, h - 11)} fill={shade(color, -0.3)} />);
+        parts.push(<polygon key={`muR${i}`} points={quad(Q, t - 0.008, t + 0.008, 3, h - 11)} fill={shade(color, -0.3)} />);
+      });
+      parts.push(<polygon key="car" points={quad(P, 0.2, 0.5, 4, 11)} fill={busy ? '#ffcf5a' : '#e0644f'} opacity="0.85" />);
+      const px = cx + a * 0.9, py = cy + b * 0.25;
+      parts.push(<Box key="pole" cx={px} cy={py} a={2.5} b={1.3} h={44} color="#6b6f76" />);
+      parts.push(<Box key="sign" cx={px} cy={py} a={9} b={4.5} h={14} z0={44} color={shade(color, 0.25)} />);
+      break;
+    }
+    case 'studio': {
+      const z = h, L = [cx - a * 0.7, cy - b * 0.1 - z], R = [cx + a * 0.3, cy + b * 0.4 - z];
+      parts.push(<line key="pL" x1={L[0]} y1={L[1]} x2={L[0]} y2={L[1] - 14} stroke="#4b4f56" strokeWidth="2" />);
+      parts.push(<line key="pR" x1={R[0]} y1={R[1]} x2={R[0]} y2={R[1] - 14} stroke="#4b4f56" strokeWidth="2" />);
+      const bb = [[L[0] - 4, L[1] - 12], [R[0] + 4, R[1] - 12 + 2], [R[0] + 4, R[1] - 36 + 2], [L[0] - 4, L[1] - 36]];
+      parts.push(<polygon key="board" points={pts(bb)} fill="#1f2630" stroke="#f2b632" strokeWidth="1.6" />);
+      const mx = (L[0] + R[0]) / 2, my = (L[1] + R[1]) / 2 - 24;
+      parts.push(<path key="play" d={`M ${mx - 4} ${my - 6} L ${mx + 6} ${my} L ${mx - 4} ${my + 6} Z`} fill={busy ? '#ffe2a3' : shade(color, 0.4)} />);
+      break;
+    }
+    case 'house': {
+      const ap = [cx, cy - h - 30];
+      parts.push(<polygon key="roofL" points={pts([ap, [cx - a, cy - h], [cx, cy + b - h]])} fill={shade(color, -0.35)} stroke={shade(color, -0.55)} strokeWidth="0.6" />);
+      parts.push(<polygon key="roofR" points={pts([ap, [cx, cy + b - h], [cx + a, cy - h]])} fill={shade(color, -0.5)} stroke={shade(color, -0.6)} strokeWidth="0.6" />);
+      parts.push(<polygon key="door" points={quad(Q, 0.35, 0.55, 0, 16)} fill="#3b2a20" />);
+      parts.push(<polygon key="hwin" points={quad(P, 0.3, 0.6, 10, 20)} fill={busy ? '#ffe2a3' : '#9cc3d9'} />);
+      break;
+    }
+    case 'factory':
+      [[-0.35, 0], [0.25, -0.2]].forEach(([dx, dy], i) => {
+        const sx = cx + dx * a, sy = cy + dy * b;
+        parts.push(<Box key={`stk${i}`} cx={sx} cy={sy} a={6} b={3} h={34} z0={h} color="#7b5d4c" />);
+        parts.push(
+          <g key={`puff${i}`} className="puff" style={{ animationDelay: `${i * 1.3}s` }}>
+            <circle cx={sx} cy={sy - h - 42} r="6" fill="#e9e6df" opacity="0.8" />
+            <circle cx={sx + 6} cy={sy - h - 50} r="5" fill="#e9e6df" opacity="0.6" />
+          </g>
+        );
+      });
+      break;
+    case 'warehouse': {
+      [0.2, 0.5, 0.8].forEach((t, i) => {
+        const base = P(t, h), off = [base[0] + a, base[1] - b];
+        const tA = [base[0], base[1] - 12], tB = [off[0], off[1] - 12];
+        parts.push(<polygon key={`saw${i}`} points={pts([base, tA, tB, off])} fill="#cfe3ec" stroke={shade(color, -0.4)} strokeWidth="0.6" />);
+        const nb = P(t + 0.3 > 1 ? 1 : t + 0.3, h), nOff = [nb[0] + a, nb[1] - b];
+        parts.push(<polygon key={`sawr${i}`} points={pts([tA, tB, nOff, nb])} fill={shade(color, 0.15)} stroke={shade(color, -0.4)} strokeWidth="0.6" />);
+      });
+      parts.push(<polygon key="dock" points={quad(Q, 0.25, 0.75, 0, 22)} fill="#d4d0c6" />);
+      [0, 1, 2, 3, 4].forEach(i => parts.push(<polygon key={`dl${i}`} points={quad(Q, 0.25, 0.75, 3 + i * 4, 3.8 + i * 4)} fill="#a6a197" />));
+      break;
+    }
+    case 'lab': {
+      const r = a * 0.55;
+      parts.push(<path key="dome" d={`M ${cx - r} ${cy - h} A ${r} ${r * 0.9} 0 0 1 ${cx + r} ${cy - h} A ${r} ${r * 0.45} 0 0 1 ${cx - r} ${cy - h} Z`} fill="#dfe8ee" stroke="#8aa1b1" strokeWidth="0.8" />);
+      parts.push(<path key="slit" d={`M ${cx + r * 0.1} ${cy - h - r * 0.85} L ${cx + r * 0.3} ${cy - h + 2}`} stroke="#566c7c" strokeWidth="2.4" />);
+      break;
+    }
+    case 'greenhouse': {
+      parts.push(<polygon key="gL" points={quad(P, 0.03, 0.97, 2, h - 3)} fill="#bfe3c4" opacity="0.85" />);
+      parts.push(<polygon key="gR" points={quad(Q, 0.03, 0.97, 2, h - 3)} fill="#a5d3ad" opacity="0.85" />);
+      [0.25, 0.5, 0.75].forEach((t, i) => {
+        parts.push(<polygon key={`gmL${i}`} points={quad(P, t - 0.01, t + 0.01, 2, h - 3)} fill={color} />);
+        parts.push(<polygon key={`gmR${i}`} points={quad(Q, t - 0.01, t + 0.01, 2, h - 3)} fill={color} />);
+      });
+      [0.3, 0.6].forEach((t, i) => parts.push(<circle key={`pl${i}`} cx={P(t, 8)[0]} cy={P(t, 8)[1]} r="4" fill="#3d7f4b" />));
+      const ap = [cx, cy - h - 24];
+      parts.push(<polygon key="rL" points={pts([ap, [cx - a, cy - h], [cx, cy + b - h]])} fill="#d6eedb" opacity="0.92" stroke={color} strokeWidth="1.2" />);
+      parts.push(<polygon key="rR" points={pts([ap, [cx, cy + b - h], [cx + a, cy - h]])} fill="#b9dcc0" opacity="0.92" stroke={color} strokeWidth="1.2" />);
+      break;
+    }
+    default:
+  }
+
+  return { parts, topY: cy - h - st.top, b };
+}
+
+function Building({ cx, cy, agent, status, onOpen }) {
+  const busy = status === 'busy';
+  const { parts, topY } = buildingArt({ style: agent.style, color: agent.color, seed: agent.name.length, busy, cx, cy });
 
   return (
     <g className="bldg" onClick={onOpen} role="button" tabIndex={0} aria-label={`Open ${agent.name}`}
@@ -255,7 +337,7 @@ export default function CityMap({ agents, statuses, onAdd, onOpen, onOpenCentral
   for (const [key, a] of Object.entries(agents)) {
     const [r, c] = key.split('-').map(Number);
     const h = (STYLES[a.style] || STYLES.office).height;
-    const extra = a.style === 'tower' ? 66 : a.style === 'factory' ? 70 : 48;
+    const extra = ((STYLES[a.style] || STYLES.office).top || 6) + 40;
     top = Math.min(top, center(r, c)[1] - h - extra);
   }
   const vbTop = Math.floor(top) - 4;

@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import CityMap from './CityMap';
-import { STYLES, COLORS, PROVIDERS, FIELD_LABELS, GRID, blankCity } from '../lib/city';
+import CityMap, { buildingArt } from './CityMap';
+import { STYLES, COLORS, PROVIDERS, FIELD_LABELS, GRID, W2, H2, blankCity } from '../lib/city';
 
 const STORE_KEY = 'agentcity:v1';
 const TOUR_KEY = 'agentcity:tour';
@@ -57,16 +57,18 @@ async function relay(agent, message, history, cityName) {
 
 function StyleSwatch({ style, color, selected, onClick }) {
   const st = STYLES[style];
-  const base = (COLORS.find(c => c.id === color) || COLORS[1]).base;
-  const h = Math.min(46, st.height * 0.32 + 8);
+  const { parts } = buildingArt({ style, color, seed: 3, pad: false });
+  const a = W2 * st.footprint, b = H2 * st.footprint;
+  const top = -(st.height + st.top) - 6;
+  const vb = `${-a - 14} ${top} ${2 * a + 28} ${b - top + 6}`;
   return (
     <button type="button" className={`swatch ${selected ? 'on' : ''}`} onClick={onClick} aria-pressed={selected}>
-      <svg viewBox="-30 -60 60 76" width="56" height="64" aria-hidden="true">
-        <polygon points={`0,-${h + 10} 22,-${h} 0,-${h - 10} -22,-${h}`} fill={base} style={{ filter: 'brightness(1.25)' }} />
-        <polygon points={`-22,-${h} 0,-${h - 10} 0,10 -22,0`} fill={base} />
-        <polygon points={`0,-${h - 10} 22,-${h} 22,0 0,10`} fill={base} style={{ filter: 'brightness(0.78)' }} />
+      <svg viewBox={vb} preserveAspectRatio="xMidYMax meet" aria-hidden="true">
+        <ellipse cx="6" cy={b * 0.9} rx={a * 1.05} ry={b * 0.55} fill="#000" opacity="0.1" />
+        {parts}
       </svg>
-      <span>{st.label}</span>
+      <span className="sw-name">{st.label}</span>
+      <span className="sw-good">{st.good}</span>
     </button>
   );
 }
@@ -105,7 +107,7 @@ function AgentForm({ initial, onSave, onCancel, cityName, defaultProvider = 'ant
       </label>
 
       <fieldset>
-        <legend>Building</legend>
+        <legend>Pick a building</legend>
         <div className="swatches">
           {Object.keys(STYLES).map(s => (
             <StyleSwatch key={s} style={s} color={a.color} selected={a.style === s} onClick={() => set('style', s)} />
