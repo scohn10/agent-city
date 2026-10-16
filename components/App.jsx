@@ -80,6 +80,12 @@ function AgentForm({ initial, onSave, onCancel, cityName, defaultProvider = 'ant
   });
   const [test, setTest] = useState(null);
   const prov = PROVIDERS[a.connection.provider];
+  const nameRef = useRef(null);
+  // Only jump into the name field with a real mouse/trackpad. On phones, focusing
+  // pops the keyboard over the panel before people have seen the options.
+  useEffect(() => {
+    try { if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) nameRef.current?.focus(); } catch {}
+  }, []);
 
   const set = (k, v) => setA(p => ({ ...p, [k]: v }));
   const setConn = (k, v) => setA(p => ({ ...p, connection: { ...p.connection, [k]: v } }));
@@ -100,7 +106,7 @@ function AgentForm({ initial, onSave, onCancel, cityName, defaultProvider = 'ant
   return (
     <form className="form" onSubmit={e => { e.preventDefault(); if (ready) onSave(a); }}>
       <label>Agent name
-        <input autoFocus value={a.name} maxLength={40} onChange={e => set('name', e.target.value)} placeholder="e.g. Ledger, Scout, Atlas" />
+        <input ref={nameRef} value={a.name} maxLength={40} onChange={e => set('name', e.target.value)} placeholder="e.g. Ledger, Scout, Atlas" />
       </label>
       <label>What does it do?
         <input value={a.role} maxLength={120} onChange={e => set('role', e.target.value)} placeholder="e.g. Tracks my budget and flags overspending" />

@@ -36,6 +36,7 @@ h2 { font-family: 'Space Grotesk', Inter, sans-serif; font-size: 22px; margin: 0
 }
 .brand { display: flex; align-items: center; gap: 8px; font-family: 'Space Grotesk', sans-serif; font-weight: 700; white-space: nowrap; }
 .cityname {
+  font-size: 16px;
   flex: 1; min-width: 0; max-width: 260px;
   border: 1px solid transparent; background: transparent; border-radius: 8px;
   padding: 6px 8px; font-weight: 600; color: var(--ink-2);
@@ -150,7 +151,7 @@ h2 { font-family: 'Space Grotesk', Inter, sans-serif; font-size: 22px; margin: 0
 .form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .form input, .form textarea {
   border: 1px solid var(--line); border-radius: 10px; background: #fff;
-  padding: 9px 11px; font-weight: 400; color: var(--ink); font-size: 15px;
+  padding: 9px 11px; font-weight: 400; color: var(--ink); font-size: 16px;
 }
 .form input:focus, .form textarea:focus, .composer textarea:focus { outline: 2px solid #e8cf98; border-color: var(--gold); }
 fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px 12px; margin: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -191,7 +192,7 @@ legend { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-sp
 .composer { display: flex; gap: 8px; align-items: flex-end; padding-top: 8px; }
 .composer textarea {
   flex: 1; resize: none; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
-  background: #fff; max-height: 140px; font-size: 15px;
+  background: #fff; max-height: 140px; font-size: 16px;
 }
 
 /* central */
@@ -271,3 +272,6 @@ legend { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-sp
 @media (prefers-reduced-motion: reduce) {
   .coach, .modal { animation: none; }
 }
+
+/* iOS zooms into any focused field under 16px; keep every editable field at 16px+ */
+input, textarea, select { font-size: max(16px, 1em); }
