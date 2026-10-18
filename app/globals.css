@@ -403,3 +403,27 @@ input, textarea, select { font-size: max(16px, 1em); }
 @media (max-width: 720px) {
   .planpill { padding: 4px 10px; font-size: 12px; }
 }
+
+/* ---------- accounts & sync ---------- */
+.signin { padding: 5px 12px; font-size: 13px; white-space: nowrap; }
+.userbtn { display: inline-flex; align-items: center; min-width: 32px; }
+.signinrow { gap: 10px; }
+.signinrow .hint { flex-basis: 100%; margin: 0; }
+.choices { display: flex; flex-direction: column; gap: 10px; }
+.choicecard {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+}
+.choicecard:hover { border-color: var(--ink); }
+.choicecard strong { font-size: 15px; }
+.choicecard span { font-size: 13px; color: var(--ink-2); }
+.syncline { color: var(--ok); }
+@media (max-width: 720px) {
+  .top { gap: 8px; padding: 10px 12px; }
+  .brand .name { display: none; }
+}
+.keynote {
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  background: #fff6e2; border: 1px solid #ecd39a; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; font-size: 13.5px;
+}
+.keynote .ghost { flex: 0 0 auto; padding: 6px 10px; font-size: 13px; }

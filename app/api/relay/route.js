@@ -202,7 +202,7 @@ export async function POST(req) {
 
   const { files, error: fileError } = cleanFiles(body.attachments);
   if (fileError) return bad(fileError);
-  if (files.length && billingConfigured() && !planInfo(requestPlan(req)).features.files) {
+  if (files.length && billingConfigured() && !planInfo(await requestPlan(req)).features.files) {
     return bad('File attachments are part of the Town and City plans.', 402);
   }
 

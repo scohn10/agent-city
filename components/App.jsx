@@ -8,6 +8,7 @@ import {
 } from './media';
 import { STYLES, COLORS, PROVIDERS, FIELD_LABELS, GRID, W2, H2, blankCity } from '../lib/city';
 import { PLANS, PAID_PLANS, planInfo } from '../lib/plans';
+import { AccountProvider, AccountButton, useAccount } from './account';
 
 const STORE_KEY = 'agentcity:v1';
 const TOUR_KEY = 'agentcity:tour';
@@ -34,8 +35,64 @@ function load() {
     return c && typeof c === 'object' && c.agents ? c : null;
   } catch { return null; }
 }
+const KEYS_KEY = 'agentcity:keys';
+function loadKeys() {
+  try { return JSON.parse(localStorage.getItem(KEYS_KEY) || '{}') || {}; } catch { return {}; }
+}
 function save(city) {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(city)); } catch {}
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(city));
+    // API keys are never synced to an account, so remember them per agent on this device.
+    const keys = loadKeys();
+    for (const a of Object.values(city.agents || {})) {
+      if (!a.id) continue;
+      const { apiKey, secret } = a.connection || {};
+      if (apiKey || secret) keys[a.id] = { ...(apiKey ? { apiKey } : {}), ...(secret ? { secret } : {}) };
+    }
+    localStorage.setItem(KEYS_KEY, JSON.stringify(keys));
+  } catch {}
+}
+
+// Removes device-only data (keys, unread counts, image previews) before syncing.
+function forSync(city) {
+  return {
+    name: city.name,
+    version: 1,
+    agents: Object.fromEntries(Object.entries(city.agents || {}).map(([lot, a]) => {
+      const { apiKey, secret, ...conn } = a.connection || {};
+      return [lot, {
+        ...a, connection: conn, unread: 0,
+        history: (a.history || []).slice(-40).map(({ files, ...m }) => (files ? { ...m, files: files.map(({ thumb, ...f }) => f) } : m)),
+      }];
+    })),
+  };
+}
+const layoutOf = city => JSON.stringify({
+  name: city.name,
+  agents: Object.fromEntries(Object.entries(city.agents || {}).map(([lot, a]) => {
+    const { apiKey, secret, ...conn } = a.connection || {};
+    return [lot, [a.id, a.name, a.role, a.style, a.color, a.instructions || '', a.voice || '', conn]];
+  })),
+});
+
+// Puts this device's saved API keys back onto a city that came from the account.
+function withLocalKeys(remote, local) {
+  const keys = loadKeys();
+  for (const a of Object.values(local?.agents || {})) {
+    const { apiKey, secret } = a.connection || {};
+    if (a.id && (apiKey || secret)) keys[a.id] = { ...(apiKey ? { apiKey } : {}), ...(secret ? { secret } : {}) };
+  }
+  return {
+    ...remote,
+    agents: Object.fromEntries(Object.entries(remote.agents || {}).map(([lot, a]) => {
+      const localA = local?.agents?.[lot];
+      return [lot, {
+        ...a,
+        connection: { ...a.connection, ...(keys[a.id] || {}) },
+        unread: localA && localA.id === a.id ? localA.unread || 0 : 0,
+      }];
+    })),
+  };
 }
 
 function uid() {
@@ -508,18 +565,20 @@ const REASON_COPY = {
   files: () => 'Attaching files is part of the Town and City plans.',
 };
 
-function extractRestore(input) {
-  const v = String(input || '').trim();
-  const m = v.match(/[?&]restore=([^&\s]+)/);
-  return m ? decodeURIComponent(m[1]) : v;
-}
+const PENDING_KEY = 'agentcity:pendingPlan';
 
 function PlansModal({ plan, subscribed, reason, onClose, onBilling }) {
+  const { me, signIn } = useAccount();
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
-  const [restore, setRestore] = useState('');
 
   async function go(path, body, key) {
+    // Subscriptions belong to an account, so sign in first and pick up where we left off.
+    if (!me.signedIn && me.auth) {
+      if (body?.plan) { try { sessionStorage.setItem(PENDING_KEY, body.plan); } catch {} }
+      signIn();
+      return;
+    }
     setBusy(key); setErr('');
     try {
       const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -588,16 +647,14 @@ function PlansModal({ plan, subscribed, reason, onClose, onBilling }) {
             <button className="linkbtn" disabled={!!busy} onClick={() => go('/api/billing/portal', null, 'portal')}>
               {busy === 'portal' ? 'Opening…' : 'Manage billing, invoices, or cancel'}
             </button>
-          ) : (
-            <form className="restore" onSubmit={e => { e.preventDefault(); if (restore.trim()) go('/api/billing/restore', { token: extractRestore(restore) }, 'restore'); }}>
-              <label htmlFor="restore-in">Already subscribed on another device?</label>
-              <div className="row">
-                <input id="restore-in" value={restore} onChange={e => setRestore(e.target.value)} placeholder="Paste your restore link" autoComplete="off" />
-                <button className="ghost" disabled={!restore.trim() || !!busy}>{busy === 'restore' ? 'Restoring…' : 'Restore'}</button>
-              </div>
-            </form>
-          )}
-          <p className="hint">Secure checkout by Stripe. Cancel anytime from Manage billing. Your API keys and chats never leave your browser.</p>
+          ) : !me.signedIn && me.auth ? (
+            <div className="row signinrow">
+              <span>Already subscribed?</span>
+              <button className="ghost" onClick={signIn}>Sign in</button>
+              <span className="hint">You'll sign in before checkout so your plan works on every device.</span>
+            </div>
+          ) : null}
+          <p className="hint">Secure checkout by Stripe. Cancel anytime from Manage billing. Your API keys stay on your devices and are never stored on our servers.</p>
         </div>
       </div>
     </div>
@@ -606,20 +663,14 @@ function PlansModal({ plan, subscribed, reason, onClose, onBilling }) {
 
 function WelcomePlan({ info, onClose }) {
   const p = planInfo(info.plan);
-  const link = typeof window !== 'undefined' ? `${window.location.origin}/?restore=${encodeURIComponent(info.restore)}` : '';
-  const [copied, setCopied] = useState(false);
   return (
     <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="wp-title">
       <div className="modal">
         <h2 id="wp-title">Welcome to {p.name}</h2>
         <p className="lede">Your city now has room for {p.lots === 24 ? 'all 24' : `up to ${p.lots}`} agents, plus voice mode and file attachments.</p>
         <div className="restorebox">
-          <strong>Use your plan on your other devices</strong>
-          <p>Open this link on your phone or another computer. Keep it private: anyone with it can use your plan.</p>
-          <div className="row">
-            <input readOnly value={link} onFocus={e => e.target.select()} aria-label="Restore link" />
-            <button className="ghost" onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); } catch {} }}>{copied ? 'Copied' : 'Copy'}</button>
-          </div>
+          <strong>It's on your account</strong>
+          <p>Sign in on your phone or any other computer and your plan and your city come with you.</p>
           {info.email && <p className="hint">Your receipt went to {info.email}.</p>}
         </div>
         <div className="actions"><button className="primary" onClick={onClose}>Start building</button></div>
@@ -630,7 +681,15 @@ function WelcomePlan({ info, onClose }) {
 
 /* ---------------- App ---------------- */
 
-export default function App() {
+export default function Root({ clerk = false }) {
+  return (
+    <AccountProvider clerk={clerk}>
+      <App />
+    </AccountProvider>
+  );
+}
+
+function App() {
   const [city, setCity] = useState(blankCity);
   const [loaded, setLoaded] = useState(false);
   const [statuses, setStatuses] = useState({});
@@ -641,9 +700,12 @@ export default function App() {
   const tourRef = useRef(tour);
   tourRef.current = tour;
   const setTour = step => { setTourState(step); saveTour(step); };
+  const { me } = useAccount();
   const [billing, setBilling] = useState({ plan: 'free', billing: false, subscribed: false });
+  const [sync, setSync] = useState({ state: 'off', at: 0 }); // off | pulling | saving | synced | error
+  const [choice, setChoice] = useState(null);                // { remote, updatedAt } when device and account cities differ
   const [upsell, setUpsell] = useState(null);     // { reason } while the plans screen is open
-  const [purchase, setPurchase] = useState(null); // { plan, restore, email } right after checkout
+  const [purchase, setPurchase] = useState(null); // { plan, email } right after checkout
   const [notice, setNotice] = useState('');
   const fileRef = useRef(null);
   const viewRef = useRef(view);
@@ -657,41 +719,135 @@ export default function App() {
     setLoaded(true);
   }, []);
 
-  // Billing: read plan, and finish any checkout / restore / portal round-trip in the URL.
+  // Billing: finish any checkout / portal round-trip in the URL, then read the plan.
+  const confirmed = useRef(false);
   useEffect(() => {
+    if (!me.loaded) return;
     const url = new URL(window.location.href);
     const q = url.searchParams;
-    const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-      .then(r => r.json().then(d => (r.ok ? d : Promise.reject(new Error(d.error || 'Something went wrong')))));
-    const clean = () => { ['checkout', 'session_id', 'restore', 'billing'].forEach(k => q.delete(k)); window.history.replaceState(null, '', url.pathname + (q.toString() ? `?${q}` : '')); };
-
+    const clean = () => { ['checkout', 'session_id', 'billing', 'restore'].forEach(k => q.delete(k)); window.history.replaceState(null, '', url.pathname + (q.toString() ? `?${q}` : '')); };
     (async () => {
       try {
-        if (q.get('checkout') === 'success' && q.get('session_id')) {
-          const d = await post('/api/billing/confirm', { session_id: q.get('session_id') });
-          setBilling({ plan: d.plan, billing: true, subscribed: true });
+        if (!confirmed.current && q.get('checkout') === 'success' && q.get('session_id')) {
+          confirmed.current = true;
+          const r = await fetch('/api/billing/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: q.get('session_id') }) });
+          const d = await r.json().catch(() => ({}));
+          clean();
+          if (!r.ok) throw new Error(d.error || 'Could not confirm your plan');
+          setBilling(b => ({ ...b, plan: d.plan, billing: true, subscribed: true }));
           setPurchase(d);
-          clean();
           return;
         }
-        if (q.get('restore')) {
-          const d = await post('/api/billing/restore', { token: q.get('restore') });
-          setBilling({ plan: d.plan, billing: true, subscribed: true });
-          setNotice(`${planInfo(d.plan).name} plan restored on this device.`);
-          clean();
-          return;
-        }
-        if (q.get('checkout') === 'cancel') clean();
         const refresh = q.get('billing') === 'updated';
-        if (refresh) clean();
+        if (q.get('checkout') || q.get('billing') || q.get('restore')) clean();
         const r = await fetch(`/api/billing/status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' });
         if (r.ok) setBilling(await r.json());
       } catch (e) {
         setNotice(e.message);
-        clean();
       }
     })();
-  }, []);
+  }, [me.loaded, me.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pick up a plan someone chose before signing in.
+  useEffect(() => {
+    if (!me.signedIn || !billing.billing) return;
+    let pending = null;
+    try { pending = sessionStorage.getItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY); } catch {}
+    if (!pending || billing.plan === pending) return;
+    fetch('/api/billing/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: pending }) })
+      .then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; else if (d.error) setNotice(d.error); })
+      .catch(() => {});
+  }, [me.signedIn, billing.billing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------- account sync ---------- */
+  const syncBase = useRef(0);          // updatedAt of the account copy we last agreed with
+  const syncReady = useRef(false);
+  const applyingRemote = useRef(false);
+  const pushTimer = useRef(null);
+  const cityRef = useRef(city);
+  cityRef.current = city;
+
+  function applyRemote(remote, updatedAt) {
+    applyingRemote.current = true;
+    setCity(c => withLocalKeys({ ...blankCity(), ...remote }, c));
+    syncBase.current = updatedAt;
+    setSync({ state: 'synced', at: Date.now() });
+    if (Object.keys(remote.agents || {}).length) setTour('done');
+  }
+
+  async function pushCity(force = false) {
+    setSync(x => ({ ...x, state: 'saving' }));
+    try {
+      const r = await fetch('/api/city', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ city: forSync(cityRef.current), baseUpdatedAt: syncBase.current, force }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 409 && d.city) {
+        applyRemote(d.city, d.updatedAt);
+        setNotice('Updated with changes from your other device.');
+        return;
+      }
+      if (!r.ok) throw new Error(d.error || 'Sync failed');
+      syncBase.current = d.updatedAt;
+      setSync({ state: 'synced', at: Date.now() });
+    } catch {
+      setSync(x => ({ ...x, state: 'error' }));
+    }
+  }
+
+  async function pullCity(initial) {
+    const r = await fetch('/api/city', { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.enabled) return;
+    const local = cityRef.current;
+    if (!initial) {
+      if (d.city && d.updatedAt > syncBase.current && !pushTimer.current) applyRemote(d.city, d.updatedAt);
+      return;
+    }
+    if (!d.city) {
+      syncReady.current = true;
+      if (Object.keys(local.agents).length || local.name !== 'My City') await pushCity(true);
+      else setSync({ state: 'synced', at: Date.now() });
+      return;
+    }
+    if (!Object.keys(local.agents).length || layoutOf(local) === layoutOf(d.city)) {
+      applyRemote(d.city, d.updatedAt);
+      syncReady.current = true;
+      return;
+    }
+    setChoice({ remote: d.city, updatedAt: d.updatedAt });
+  }
+
+  useEffect(() => {
+    if (!loaded || !me.loaded) return;
+    if (!me.signedIn || !me.sync) {
+      syncReady.current = false; syncBase.current = 0;
+      setSync({ state: 'off', at: 0 });
+      return;
+    }
+    setSync({ state: 'pulling', at: 0 });
+    pullCity(true).catch(() => setSync({ state: 'error', at: 0 }));
+  }, [loaded, me.loaded, me.signedIn, me.id, me.sync]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save to the account shortly after each change.
+  useEffect(() => {
+    if (!syncReady.current) return;
+    if (applyingRemote.current) { applyingRemote.current = false; return; }
+    clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(() => { pushTimer.current = null; pushCity(); }, 1500);
+    return () => clearTimeout(pushTimer.current);
+  }, [city]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pick up changes made on another device when coming back to this tab.
+  useEffect(() => {
+    const onFocus = () => { if (syncReady.current && document.visibilityState === 'visible') pullCity(false).catch(() => {}); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { if (loaded) save(city); }, [city, loaded]);
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') closeViewRef.current(); };
@@ -854,6 +1010,7 @@ export default function App() {
           </button>
         )}
         <button className="ghost helpbtn" onClick={() => { setView(null); setTour('welcome'); }} aria-label="Restart the tour">Tour</button>
+        <AccountButton />
       </header>
 
       <main className="stage">
@@ -917,6 +1074,12 @@ export default function App() {
                 <button className="ghost" onClick={() => updateAgent(view.lot, a => ({ ...a, history: [] }))}>Clear chat</button>
                 <button className="ghost danger" onClick={() => removeAgent(view.lot)}>Demolish</button>
               </div>
+              {(PROVIDERS[current.connection.provider]?.fields || []).includes('apiKey') && !current.connection.apiKey && (
+                <div className="keynote">
+                  <span><b>Add this agent's API key on this device.</b> Keys stay on each device and aren't synced to your account.</span>
+                  <button className="ghost" onClick={() => setView({ type: 'edit', lot: view.lot })}>Add key</button>
+                </div>
+              )}
               {tour === 'chat' && (
                 <TourNote step="chat" title="Give it its first task" onSkip={() => setTour('done')}>
                   Type anything below, or tap a suggestion to send it.
@@ -977,6 +1140,12 @@ export default function App() {
                   <button className="ghost" onClick={() => fileRef.current?.click()}>Import layout</button>
                   <input ref={fileRef} type="file" accept="application/json" hidden onChange={e => e.target.files[0] && importCity(e.target.files[0])} />
                 </div>
+                {me.signedIn && me.sync && (
+                  <p className="hint syncline">
+                    {sync.state === 'saving' ? 'Saving to your account…' : sync.state === 'error' ? 'Couldn\'t reach your account. Changes are saved on this device and will sync when you\'re back online.' : sync.state === 'pulling' ? 'Loading your city…' : 'Synced to your account. API keys stay on each device.'}
+                  </p>
+                )}
+                {me.auth && !me.signedIn && <p className="hint">Sign in to keep this city on all your devices.</p>}
                 <p className="hint">Exports leave out API keys and chat history. Keys live only in this browser and pass through the relay when an agent runs; they are never stored on the server.</p>
               </details>
             </>
@@ -989,6 +1158,24 @@ export default function App() {
           onClose={() => setUpsell(null)} onBilling={b => setBilling(x => ({ ...x, ...b, billing: true }))} />
       )}
       {purchase && <WelcomePlan info={purchase} onClose={() => setPurchase(null)} />}
+      {choice && (
+        <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="choice-title">
+          <div className="modal">
+            <h2 id="choice-title">Which city do you want?</h2>
+            <p className="lede">Your account already has a city, and this device has a different one.</p>
+            <div className="choices">
+              <button className="choicecard" onClick={() => { applyRemote(choice.remote, choice.updatedAt); syncReady.current = true; setChoice(null); }}>
+                <strong>Use my account's city</strong>
+                <span>{choice.remote.name} · {Object.keys(choice.remote.agents || {}).length} agents</span>
+              </button>
+              <button className="choicecard" onClick={() => { syncReady.current = true; syncBase.current = choice.updatedAt; setChoice(null); pushCity(true); }}>
+                <strong>Keep this device's city</strong>
+                <span>{city.name} · {count} agents. Replaces the one on your account.</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {notice && (
         <div className="toast" role="status" onClick={() => setNotice('')}>{notice}</div>
       )}
