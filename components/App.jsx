@@ -7,6 +7,7 @@ import {
   ttsSupported, speak, stopSpeaking, unlockSpeech,
 } from './media';
 import { STYLES, COLORS, PROVIDERS, FIELD_LABELS, GRID, W2, H2, blankCity } from '../lib/city';
+import { PLANS, PAID_PLANS, planInfo } from '../lib/plans';
 
 const STORE_KEY = 'agentcity:v1';
 const TOUR_KEY = 'agentcity:tour';
@@ -212,6 +213,9 @@ const Icon = {
   wave: <path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 10v4M21 12h0" />,
   file: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
   x: <path d="M7 7l10 10M17 7 7 17" />,
+  lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  check: <path d="M5 12.5 10 17l9-10" />,
+  dash: <path d="M7 12h10" />,
 };
 const Svg = ({ name, size = 20 }) => (
   <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{Icon[name]}</svg>
@@ -233,7 +237,7 @@ function FileChips({ files, onRemove }) {
   );
 }
 
-function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () => undefined }) {
+function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () => undefined, canVoice = true, canFiles = true, onLocked = () => {} }) {
   const [text, setText] = useState('');
   const [files, setFiles] = useState([]);
   const [notes, setNotes] = useState([]);
@@ -306,6 +310,7 @@ function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () 
   }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleVoiceMode() {
+    if (!voiceMode && !canVoice) { onLocked('voiceMode'); return; }
     if (voiceMode) {
       setVoiceMode(false);
       queue.current = [];
@@ -339,8 +344,14 @@ function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () 
     dict.start(said => { if (said) setText(t => (t ? t.replace(/\s*$/, ' ') : '') + said); });
   }
 
+  function pickFiles() {
+    if (!canFiles) { onLocked('files'); return; }
+    fileInput.current?.click();
+  }
+
   async function addFiles(list) {
     if (!list || !list.length) return;
+    if (!canFiles) { onLocked('files'); return; }
     const { items, errors } = await prepareFiles(list, files);
     setFiles(f => [...f, ...items]);
     setNotes(errors);
@@ -351,13 +362,14 @@ function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () 
 
   return (
     <div className={`chat ${drag ? 'dragging' : ''}`}
-      onDragOver={e => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setDrag(true); } }}
+      onDragOver={e => { if (canFiles && e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setDrag(true); } }}
       onDragLeave={e => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={e => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}>
       {canSpeak && (
         <div className="voicebar">
           <button type="button" className={`vtoggle ${voiceMode ? 'on' : ''}`} onClick={toggleVoiceMode} aria-pressed={voiceMode}>
             <Svg name="wave" size={16} /> Voice mode {voiceMode ? 'on' : 'off'}
+            {!canVoice && <span className="lockpill"><Svg name="lock" size={12} /> Town</span>}
           </button>
           {status && <span className={`vstatus ${dict.listening ? 'live' : ''}`}>{status}</span>}
         </div>
@@ -399,8 +411,10 @@ function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () 
       <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
         <input ref={fileInput} type="file" accept={ACCEPT} multiple hidden
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-        <button type="button" className="iconbtn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files">
+        <button type="button" className={`iconbtn ${canFiles ? '' : 'locked'}`} onClick={pickFiles}
+          aria-label={canFiles ? 'Attach files' : 'Attach files (Town and City plans)'} title={canFiles ? 'Attach files' : 'Attaching files is part of Town and City'}>
           <Svg name="clip" />
+          {!canFiles && <span className="lockdot"><Svg name="lock" size={10} /></span>}
         </button>
         <textarea rows={1} value={shown} placeholder={dict.listening ? 'Listening…' : placeholder} readOnly={dict.listening}
           onChange={e => setText(e.target.value)}
@@ -486,6 +500,134 @@ function TourNote({ step, title, children, onSkip, action }) {
   );
 }
 
+/* ---------------- Plans ---------------- */
+
+const REASON_COPY = {
+  lots: plan => `You've used all ${planInfo(plan).lots} lots on the ${planInfo(plan).name} plan. Upgrade to build more agents.`,
+  voiceMode: () => 'Voice mode is part of the Town and City plans.',
+  files: () => 'Attaching files is part of the Town and City plans.',
+};
+
+function extractRestore(input) {
+  const v = String(input || '').trim();
+  const m = v.match(/[?&]restore=([^&\s]+)/);
+  return m ? decodeURIComponent(m[1]) : v;
+}
+
+function PlansModal({ plan, subscribed, reason, onClose, onBilling }) {
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const [restore, setRestore] = useState('');
+
+  async function go(path, body, key) {
+    setBusy(key); setErr('');
+    try {
+      const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Something went wrong');
+      if (data.url) { window.location.href = data.url; return; }
+      if (data.plan) { onBilling({ plan: data.plan, subscribed: true }); onClose(); }
+    } catch (e) {
+      setErr(e.message);
+      setBusy('');
+    }
+  }
+
+  const rows = [
+    ['Agents', p => p.lots === 24 ? 'All 24 agents' : `Up to ${p.lots} agents`],
+    ['Chat, mic dictation, read aloud', () => true],
+    ['Voice mode (hands-free)', p => p.features.voiceMode],
+    ['File attachments', p => p.features.files],
+  ];
+
+  return (
+    <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="plans-title" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal plans">
+        <button className="close" onClick={onClose} aria-label="Close">×</button>
+        <h2 id="plans-title">Grow your city</h2>
+        <p className="lede">{reason ? REASON_COPY[reason](plan) : 'Pick the plan that fits how many agents you run.'}</p>
+        <div className="plancards">
+          {['free', ...PAID_PLANS].map(id => {
+            const p = PLANS[id];
+            const isCurrent = id === plan;
+            let action;
+            if (isCurrent) action = <button className="ghost" disabled>Current plan</button>;
+            else if (id === 'free') action = subscribed
+              ? <button className="ghost" disabled={!!busy} onClick={() => go('/api/billing/portal', null, id)}>{busy === id ? 'Opening…' : 'Downgrade'}</button>
+              : <button className="ghost" disabled>Free forever</button>;
+            else action = (
+              <button className="primary" disabled={!!busy} onClick={() => go('/api/billing/checkout', { plan: id }, id)}>
+                {busy === id ? 'Opening…' : subscribed ? `Switch to ${p.name}` : `Choose ${p.name}`}
+              </button>
+            );
+            return (
+              <div key={id} className={`plancard ${isCurrent ? 'current' : ''} ${id === 'city' ? 'best' : ''}`}>
+                {id === 'city' && <span className="ribbon">Most room</span>}
+                <div className="pname">{p.name}</div>
+                <div className="pprice">{p.price ? <>${p.price.toFixed(2)}<small>/month</small></> : 'Free'}</div>
+                <div className="pblurb">{p.blurb}</div>
+                <ul className="pfeat">
+                  {rows.map(([label, fn]) => {
+                    const v = fn(p);
+                    return (
+                      <li key={label} className={v ? '' : 'off'}>
+                        <Svg name={v ? 'check' : 'dash'} size={15} />
+                        <span>{typeof v === 'string' ? v : label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {action}
+              </div>
+            );
+          })}
+        </div>
+        {err && <p className="fnote">{err}</p>}
+        <div className="planfoot">
+          {subscribed ? (
+            <button className="linkbtn" disabled={!!busy} onClick={() => go('/api/billing/portal', null, 'portal')}>
+              {busy === 'portal' ? 'Opening…' : 'Manage billing, invoices, or cancel'}
+            </button>
+          ) : (
+            <form className="restore" onSubmit={e => { e.preventDefault(); if (restore.trim()) go('/api/billing/restore', { token: extractRestore(restore) }, 'restore'); }}>
+              <label htmlFor="restore-in">Already subscribed on another device?</label>
+              <div className="row">
+                <input id="restore-in" value={restore} onChange={e => setRestore(e.target.value)} placeholder="Paste your restore link" autoComplete="off" />
+                <button className="ghost" disabled={!restore.trim() || !!busy}>{busy === 'restore' ? 'Restoring…' : 'Restore'}</button>
+              </div>
+            </form>
+          )}
+          <p className="hint">Secure checkout by Stripe. Cancel anytime from Manage billing. Your API keys and chats never leave your browser.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WelcomePlan({ info, onClose }) {
+  const p = planInfo(info.plan);
+  const link = typeof window !== 'undefined' ? `${window.location.origin}/?restore=${encodeURIComponent(info.restore)}` : '';
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="wp-title">
+      <div className="modal">
+        <h2 id="wp-title">Welcome to {p.name}</h2>
+        <p className="lede">Your city now has room for {p.lots === 24 ? 'all 24' : `up to ${p.lots}`} agents, plus voice mode and file attachments.</p>
+        <div className="restorebox">
+          <strong>Use your plan on your other devices</strong>
+          <p>Open this link on your phone or another computer. Keep it private: anyone with it can use your plan.</p>
+          <div className="row">
+            <input readOnly value={link} onFocus={e => e.target.select()} aria-label="Restore link" />
+            <button className="ghost" onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); } catch {} }}>{copied ? 'Copied' : 'Copy'}</button>
+          </div>
+          {info.email && <p className="hint">Your receipt went to {info.email}.</p>}
+        </div>
+        <div className="actions"><button className="primary" onClick={onClose}>Start building</button></div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- App ---------------- */
 
 export default function App() {
@@ -499,6 +641,10 @@ export default function App() {
   const tourRef = useRef(tour);
   tourRef.current = tour;
   const setTour = step => { setTourState(step); saveTour(step); };
+  const [billing, setBilling] = useState({ plan: 'free', billing: false, subscribed: false });
+  const [upsell, setUpsell] = useState(null);     // { reason } while the plans screen is open
+  const [purchase, setPurchase] = useState(null); // { plan, restore, email } right after checkout
+  const [notice, setNotice] = useState('');
   const fileRef = useRef(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -510,6 +656,42 @@ export default function App() {
     setTourState(t || (c && Object.keys(c.agents).length ? 'done' : 'welcome'));
     setLoaded(true);
   }, []);
+
+  // Billing: read plan, and finish any checkout / restore / portal round-trip in the URL.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const q = url.searchParams;
+    const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(r => r.json().then(d => (r.ok ? d : Promise.reject(new Error(d.error || 'Something went wrong')))));
+    const clean = () => { ['checkout', 'session_id', 'restore', 'billing'].forEach(k => q.delete(k)); window.history.replaceState(null, '', url.pathname + (q.toString() ? `?${q}` : '')); };
+
+    (async () => {
+      try {
+        if (q.get('checkout') === 'success' && q.get('session_id')) {
+          const d = await post('/api/billing/confirm', { session_id: q.get('session_id') });
+          setBilling({ plan: d.plan, billing: true, subscribed: true });
+          setPurchase(d);
+          clean();
+          return;
+        }
+        if (q.get('restore')) {
+          const d = await post('/api/billing/restore', { token: q.get('restore') });
+          setBilling({ plan: d.plan, billing: true, subscribed: true });
+          setNotice(`${planInfo(d.plan).name} plan restored on this device.`);
+          clean();
+          return;
+        }
+        if (q.get('checkout') === 'cancel') clean();
+        const refresh = q.get('billing') === 'updated';
+        if (refresh) clean();
+        const r = await fetch(`/api/billing/status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' });
+        if (r.ok) setBilling(await r.json());
+      } catch (e) {
+        setNotice(e.message);
+        clean();
+      }
+    })();
+  }, []);
   useEffect(() => { if (loaded) save(city); }, [city, loaded]);
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') closeViewRef.current(); };
@@ -520,6 +702,14 @@ export default function App() {
   const agents = city.agents;
   const count = Object.keys(agents).length;
   const lotsTotal = GRID * GRID - 1;
+  // When Stripe isn't configured (self-hosted or pre-launch), everything is unlocked.
+  const limits = billing.billing ? planInfo(billing.plan) : { name: '', lots: lotsTotal, features: { voiceMode: true, files: true } };
+  const lockedFeature = reason => setUpsell({ reason });
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const updateAgent = (lot, fn) => setCity(c => {
     if (!c.agents[lot]) return c;
@@ -534,6 +724,7 @@ export default function App() {
   closeViewRef.current = closeView;
 
   function addAt(lot) {
+    if (count >= limits.lots) { setUpsell({ reason: 'lots' }); return; }
     setView({ type: 'add', lot });
     if (tourRef.current === 'plus') setTour('form');
   }
@@ -656,7 +847,12 @@ export default function App() {
         </div>
         <input className="cityname" aria-label="City name" value={city.name} maxLength={40}
           onChange={e => setCity(c => ({ ...c, name: e.target.value }))} />
-        <div className="meta">{count}/{lotsTotal} lots built</div>
+        <div className="meta">{count}/{limits.lots} lots built</div>
+        {billing.billing && (
+          <button className={`planpill ${billing.plan}`} onClick={() => setUpsell({ reason: null })}>
+            {planInfo(billing.plan).name}{billing.plan === 'free' ? ' · Upgrade' : ''}
+          </button>
+        )}
         <button className="ghost helpbtn" onClick={() => { setView(null); setTour('welcome'); }} aria-label="Restart the tour">Tour</button>
       </header>
 
@@ -732,7 +928,8 @@ export default function App() {
                   When you're away, replies wait as bubbles over the building. Next stop: Central Station.
                 </TourNote>
               )}
-              <Chat key={view.lot} messages={current.history || []} busy={statuses[view.lot] === 'busy'}
+              <Chat key={view.lot} canVoice={limits.features.voiceMode} canFiles={limits.features.files} onLocked={lockedFeature}
+                messages={current.history || []} busy={statuses[view.lot] === 'busy'}
                 placeholder={`Message ${current.name}…`}
                 suggestions={tour === 'chat' || (current.history || []).length === 0 ? STARTERS : null}
                 voiceFor={() => current.voice}
@@ -769,11 +966,13 @@ export default function App() {
               ) : <p className="empty">No agents yet. Close this and tap a + on any park.</p>}
               {count > 0 && (
                 <Chat messages={broadcast} busy={broadcasting} placeholder="Ask every agent…" onSend={askEveryone}
+                  canVoice={limits.features.voiceMode} canFiles={limits.features.files} onLocked={lockedFeature}
                   voiceFor={m => agents[m.lot]?.voice} />
               )}
               <details className="settings">
                 <summary>City settings</summary>
                 <div className="row">
+                  {billing.billing && <button className="ghost" onClick={() => setUpsell({ reason: null })}>Plan &amp; billing</button>}
                   <button className="ghost" onClick={exportCity}>Export layout</button>
                   <button className="ghost" onClick={() => fileRef.current?.click()}>Import layout</button>
                   <input ref={fileRef} type="file" accept="application/json" hidden onChange={e => e.target.files[0] && importCity(e.target.files[0])} />
@@ -785,7 +984,16 @@ export default function App() {
         </aside>
       )}
 
-      {loaded && tour === 'welcome' && (
+      {upsell && (
+        <PlansModal plan={billing.plan} subscribed={billing.subscribed} reason={upsell.reason}
+          onClose={() => setUpsell(null)} onBilling={b => setBilling(x => ({ ...x, ...b, billing: true }))} />
+      )}
+      {purchase && <WelcomePlan info={purchase} onClose={() => setPurchase(null)} />}
+      {notice && (
+        <div className="toast" role="status" onClick={() => setNotice('')}>{notice}</div>
+      )}
+
+      {loaded && tour === 'welcome' && !purchase && (
         <Welcome cityName={city.name}
           onName={v => setCity(c => ({ ...c, name: v }))}
           onStart={() => { if (!city.name.trim()) setCity(c => ({ ...c, name: 'My City' })); setTour(tourLot ? 'plus' : 'station'); }}

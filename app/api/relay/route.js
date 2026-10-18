@@ -1,6 +1,9 @@
 // Server relay: forwards a message to the user's own agent (BYO key / webhook).
 // Keys arrive per-request from the browser and are never stored or logged here.
 
+import { billingConfigured, requestPlan } from '../../../lib/server/billing';
+import { planInfo } from '../../../lib/plans';
+
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -199,6 +202,9 @@ export async function POST(req) {
 
   const { files, error: fileError } = cleanFiles(body.attachments);
   if (fileError) return bad(fileError);
+  if (files.length && billingConfigured() && !planInfo(requestPlan(req)).features.files) {
+    return bad('File attachments are part of the Town and City plans.', 402);
+  }
 
   const past = cleanHistory(history);
 

@@ -340,3 +340,66 @@ input, textarea, select { font-size: max(16px, 1em); }
 @media (prefers-reduced-motion: reduce) {
   .iconbtn.mic.live, .vstatus.live::before { animation: none; }
 }
+
+/* ---------- plans & billing ---------- */
+.planpill {
+  border: 1px solid #ecd39a; background: #fff6e2; color: var(--gold-ink);
+  border-radius: 99px; padding: 5px 12px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.planpill.town, .planpill.city { background: var(--ink); color: #f2c46b; border-color: var(--ink); }
+
+.iconbtn { position: relative; }
+.iconbtn.locked { color: var(--ink-2); }
+.lockdot {
+  position: absolute; right: -4px; top: -4px; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--gold); color: #fff; border: 2px solid var(--paper);
+}
+.lockpill {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: 4px;
+  font-size: 11px; padding: 1px 7px; border-radius: 99px; background: #efe7d3; color: var(--gold-ink);
+}
+
+.modal { position: relative; }
+.modal .close { top: 14px; right: 14px; }
+.modal.plans { width: min(820px, 100%); }
+.plancards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 4px 0 12px; }
+@media (max-width: 720px) { .plancards { grid-template-columns: 1fr; } }
+.plancard {
+  position: relative; display: flex; flex-direction: column; gap: 6px;
+  background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px 14px 14px;
+}
+.plancard.best { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.plancard.current { background: #fbf7ec; }
+.ribbon {
+  position: absolute; top: -10px; right: 12px; background: var(--gold); color: #fff;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 3px 9px; border-radius: 99px;
+}
+.pname { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; }
+.pprice { font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700; line-height: 1.1; }
+.pprice small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+.pblurb { font-size: 13px; color: var(--ink-2); }
+.pfeat { list-style: none; margin: 6px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; flex: 1; }
+.pfeat li { display: flex; gap: 6px; align-items: flex-start; }
+.pfeat li svg { flex: 0 0 auto; margin-top: 2px; color: var(--ok); }
+.pfeat li.off { color: #9a9a92; }
+.pfeat li.off svg { color: #b9b3a3; }
+.plancard button { width: 100%; }
+.planfoot { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.planfoot .linkbtn { align-self: flex-start; font-size: 14px; color: var(--ink); }
+.restore label { font-size: 13px; font-weight: 600; color: var(--ink-2); display: block; margin-bottom: 5px; }
+.restore .row { flex-wrap: nowrap; }
+.restore input, .restorebox input {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 16px; background: #fff;
+}
+.restorebox { background: #fff6e2; border: 1px solid #ecd39a; border-radius: 12px; padding: 12px; margin-bottom: 14px; }
+.restorebox p { margin: 4px 0 8px; font-size: 13.5px; }
+.restorebox .row { flex-wrap: nowrap; }
+
+.toast {
+  position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 20;
+  background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px;
+  box-shadow: 0 10px 30px rgba(31,38,48,0.25); max-width: calc(100% - 32px); cursor: pointer;
+}
+@media (max-width: 720px) {
+  .planpill { padding: 4px 10px; font-size: 12px; }
+}

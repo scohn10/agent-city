@@ -26,6 +26,38 @@ build an agent on a spotlighted park, set it up (a no-key **Demo agent** is pres
 send a first task from suggested prompts, and open Central Station. The **Tour** button in
 the header restarts it.
 
+## Plans & billing (Stripe)
+
+| Plan | Price | Agents | Voice mode + file attachments |
+|---|---|---|---|
+| Village | Free | 2 | — |
+| Town | $2.99/mo | 8 | ✓ |
+| City | $5.99/mo | 24 | ✓ |
+
+No database: Stripe is the source of truth. The webhook mirrors each customer's plan onto
+`customer.metadata.agentcity_plan`; the browser holds a signed httpOnly cookie `{cid, plan}` that is
+re-checked hourly (and immediately after returning from the Customer Portal). After checkout the
+buyer gets a private **restore link** to use their plan on other devices. Products and monthly
+prices are created automatically on first checkout (lookup keys `agentcity_town_monthly`,
+`agentcity_city_monthly`). Without `STRIPE_SECRET_KEY` the app runs with everything unlocked.
+
+Setup (do it in test mode first):
+1. Stripe → Developers → API keys → **Create restricted key** with: Checkout Sessions *Write*,
+   Customers *Write*, Subscriptions *Read*, Products *Write*, Prices *Write*,
+   Customer portal *Write*. Add it to Vercel as `STRIPE_SECRET_KEY` (mark it Sensitive).
+2. Stripe → Developers → Webhooks → **Add endpoint** `https://<domain>/api/billing/webhook` with
+   events `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `customer.subscription.created|updated|deleted|paused|resumed`, `invoice.paid`,
+   `invoice.payment_failed`. Add its signing secret to Vercel as `STRIPE_WEBHOOK_SECRET` (Sensitive).
+3. Stripe → Settings → Billing → **Customer portal**: activate it and allow switching between the
+   Town and City products, cancelling, and updating payment methods.
+4. Optional: `APP_URL` (e.g. your custom domain) and `ENTITLEMENT_SECRET` (signs cookies and restore
+   links; defaults to a value derived from the Stripe key, so rotating the key invalidates them).
+5. Redeploy. Test with card `4242 4242 4242 4242`, then repeat steps 1–3 in live mode.
+
+Voice mode and lot limits are enforced in the browser (cities live there); file attachments are
+also enforced server-side in `/api/relay`.
+
 ## Run / deploy
 
 ```bash
