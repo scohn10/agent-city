@@ -491,21 +491,30 @@ function Chat({ messages, busy, onSend, placeholder, suggestions, voiceFor = () 
 
 /* ---------------- Tour ---------------- */
 
+// 21s promo of the city. Plays muted on loop unless the visitor prefers reduced motion;
+// then it waits on its poster with controls so they can start it themselves.
+function IntroVideo() {
+  const ref = useRef(null);
+  useEffect(() => {
+    let reduced = false;
+    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
+    if (!reduced) ref.current?.play().catch(() => {});
+  }, []);
+  return (
+    <video ref={ref} className="intro-video" poster="/intro.jpg"
+      muted loop playsInline controls preload="metadata"
+      aria-label="Agent City in 20 seconds: build agents on parks, chat with them, and ask the whole city at once">
+      <source src="/intro.mp4" type="video/mp4" />
+      <source src="/intro.webm" type="video/webm" />
+    </video>
+  );
+}
+
 function Welcome({ cityName, onName, onStart, onSkip }) {
   return (
     <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
-      <div className="modal">
-        <svg className="modal-art" viewBox="-60 -44 120 70" aria-hidden="true">
-          <polygon points="0,-20 50,5 0,30 -50,5" fill="#86b86c" />
-          <polygon points="0,-20 50,5 0,30 -50,5" fill="none" stroke="#6c9c56" />
-          <polygon points="-14,-8 0,-15 14,-8 0,-1" fill="#e8dfc5" />
-          <polygon points="-14,-8 0,-1 0,14 -14,7" fill="#d9cdae" />
-          <polygon points="0,-1 14,-8 14,7 0,14" fill="#b9ad92" />
-          <line x1="0" y1="-15" x2="0" y2="-34" stroke="#4b4a45" strokeWidth="1.4" />
-          <path d="M 0 -34 l 12 3 l -12 4 z" fill="#c9963a" />
-          <circle cx="-30" cy="6" r="5" fill="#3d7f4b" /><circle cx="30" cy="6" r="5" fill="#4f9a5a" />
-          <circle cx="-6" cy="22" r="4" fill="#4f9a5a" />
-        </svg>
+      <div className="modal welcome">
+        <IntroVideo />
         <h2 id="welcome-title">Welcome to Agent City</h2>
         <p className="lede">Build a city where every building is an AI agent working for you.</p>
         <ol className="how">

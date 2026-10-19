@@ -261,6 +261,11 @@ legend { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-sp
 }
 @keyframes pop { from { transform: scale(.96); opacity: 0; } }
 .modal-art { width: 120px; height: 70px; display: block; margin: 0 auto 6px; }
+.modal.welcome { width: min(560px, 100%); }
+.intro-video {
+  display: block; width: 100%; aspect-ratio: 16 / 9; margin: 0 0 14px;
+  border-radius: 12px; background: var(--sky-2); border: 1px solid var(--line);
+}
 .modal h2 { text-align: center; margin: 0 0 4px; }
 .lede { text-align: center; color: var(--ink-2); margin: 0 0 14px; font-size: 15px; }
 .how { margin: 0 0 16px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.45; }
