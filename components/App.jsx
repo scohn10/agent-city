@@ -510,6 +510,30 @@ function IntroVideo() {
   );
 }
 
+// Shown on every visit for anyone past the first-time welcome (which has the video itself).
+function IntroModal({ cityName, onClose, onTour }) {
+  useEffect(() => {
+    const onKey = e => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="intro-title"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal welcome">
+        <button className="close" onClick={onClose} aria-label="Close">×</button>
+        <IntroVideo />
+        <h2 id="intro-title">Welcome back to {cityName || 'your city'}</h2>
+        <p className="lede">Every building is an AI agent working for you.</p>
+        <div className="actions">
+          <button className="ghost" onClick={onTour}>Take the tour</button>
+          <button className="primary" onClick={onClose} autoFocus>Enter my city</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Welcome({ cityName, onName, onStart, onSkip }) {
   return (
     <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
@@ -714,6 +738,7 @@ function App() {
   const [sync, setSync] = useState({ state: 'off', at: 0 }); // off | pulling | saving | synced | error
   const [choice, setChoice] = useState(null);                // { remote, updatedAt } when device and account cities differ
   const [upsell, setUpsell] = useState(null);     // { reason } while the plans screen is open
+  const [intro, setIntro] = useState(true); // intro video pops up once per page load
   const [purchase, setPurchase] = useState(null); // { plan, email } right after checkout
   const [notice, setNotice] = useState('');
   const fileRef = useRef(null);
@@ -1018,7 +1043,7 @@ function App() {
             {planInfo(billing.plan).name}{billing.plan === 'free' ? ' · Upgrade' : ''}
           </button>
         )}
-        <button className="ghost helpbtn" onClick={() => { setView(null); setTour('welcome'); }} aria-label="Restart the tour">Tour</button>
+        <button className="ghost helpbtn" onClick={() => { setView(null); setIntro(false); setTour('welcome'); }} aria-label="Restart the tour">Tour</button>
         <AccountButton />
       </header>
 
@@ -1189,11 +1214,16 @@ function App() {
         <div className="toast" role="status" onClick={() => setNotice('')}>{notice}</div>
       )}
 
+      {loaded && intro && tour !== 'welcome' && !purchase && (
+        <IntroModal cityName={city.name} onClose={() => setIntro(false)}
+          onTour={() => { setIntro(false); setView(null); setTour(tourLot ? 'plus' : 'station'); }} />
+      )}
+
       {loaded && tour === 'welcome' && !purchase && (
         <Welcome cityName={city.name}
           onName={v => setCity(c => ({ ...c, name: v }))}
-          onStart={() => { if (!city.name.trim()) setCity(c => ({ ...c, name: 'My City' })); setTour(tourLot ? 'plus' : 'station'); }}
-          onSkip={() => setTour('done')} />
+          onStart={() => { setIntro(false); if (!city.name.trim()) setCity(c => ({ ...c, name: 'My City' })); setTour(tourLot ? 'plus' : 'station'); }}
+          onSkip={() => { setIntro(false); setTour('done'); }} />
       )}
     </div>
   );
